@@ -7,7 +7,7 @@
 - Install [Serverless Framework](https://serverless.com/) via npm
 
 ```bash
-npm i -g serverless@v1.27.3
+npm i -g serverless@1.38.0
 ```
 
 - Install python requirements plugin
@@ -53,7 +53,6 @@ provider:
     environment:
         ### set this to your S3 bucket name
         BUCKET_NAME: pytorch-serverless
-
         ### set this to your state dict filename
         STATE_DICT_NAME: dogscats-resnext50.h5
 
@@ -97,10 +96,7 @@ X-API-KEY=[string]   ### Your generated API Key
 
 ```json
 (required)
-image_url=[url]   ### URL of image to classify
-
-(optional)
-top_k=[integer]   ### Number of top results (default: 3)
+predict_text=[string]   ### URL of image to classify
 ```
 
 - **Success Response (200)**
