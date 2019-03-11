@@ -20,13 +20,6 @@ sls plugin install -n serverless-python-requirements
 
 - Setup your model in `lib/models.py` so that it can be imported by the handler in `api/predict.py` as a method
 
-- Define your class labels in `lib/labels.txt` with one label per line, for example:
-
-```txt
-cat
-dog
-```
-
 - Setup an [AWS CLI profile](https://docs.aws.amazon.com/cli/latest/userguide/cli-multiple-profiles.html) if you
 don't have one already
 
@@ -37,7 +30,7 @@ profile can access and upload your state dictionary
 
 ```bash
 ### Change service name to whatever you please
-service: pytorch-serverless
+service:  eminem-fastai-serverless
 
 provider:
     ...
@@ -63,13 +56,6 @@ provider:
 
         ### set this to your state dict filename
         STATE_DICT_NAME: dogscats-resnext50.h5
-
-        ### set this to your input image size
-        IMAGE_SIZE: 224
-
-        ### set this to your image normalization stats
-        IMAGE_STATS: ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ...
 
     variables:
         ### set this to your api version
