@@ -1,85 +1,85 @@
-try:
-	import unzip_requirements
-except ImportError:
-	pass
+from starlette.applications import Starlette
+from starlette.responses import HTMLResponse, JSONResponse
+from starlette.staticfiles import StaticFiles
+from starlette.middleware.cors import CORSMiddleware
+import uvicorn, aiohttp, asyncio
+from io import BytesIO
+import sys
+from pathlib import Path
+import csv
+import timea
 
-import os, json, traceback
-import urllib.parse
-import torch
-import numpy as np
-
-from lib.models import classification_model
 from lib.utils import download_file, get_labels, open_image_url
-from fastai.core import A, T, VV_
-from fastai.transforms import tfms_from_stats
 
+from fastai import *
+from fastai.text import *
 
 BUCKET_NAME = os.environ['BUCKET_NAME']
 STATE_DICT_NAME = os.environ['STATE_DICT_NAME']
-STATS = A(*eval(os.environ['IMAGE_STATS']))
-SZ = int(os.environ.get('IMAGE_SIZE', '224'))
-TFMS = tfms_from_stats(STATS, SZ)[-1]
 
+model_file_url = 'https://drive.google.com/uc?export=download&id=1BSFr6LtKeQ2ueBGHsKkZ2eOfHFgKZX6j'
+model_file_name = 'tweet_fine_tuned'
+path = Path(__file__).parent
 
-class SetupModel(object):
-	model = classification_model()
-	labels = get_labels(os.environ['LABELS_PATH'])
+app = Starlette()
+app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_headers=['X-Requested-With', 'Content-Type'])
+app.mount('/static', StaticFiles(directory='app/static'))
 
-	def __init__(self, f):
-		self.f = f
-		file_path = f'/tmp/{STATE_DICT_NAME}'
-		download_file(BUCKET_NAME, STATE_DICT_NAME, file_path)
-		state_dict = torch.load(file_path, map_location=lambda storage, loc: storage)
-		self.model.load_state_dict(state_dict), self.model.eval()
-		os.remove(file_path)
+async def download_file(url, dest):
+    if dest.exists(): return
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            data = await response.read()
+            with open(dest, 'wb') as f: f.write(data)
 
-	def __call__(self, *args, **kwargs):
-		return self.f(*args, **kwargs)
+async def setup_learner():
+    await download_file(model_file_url, path/'models'/f'{model_file_name}.pth')
+    data_lm = TextLMDataBunch.load(path/'static', 'data_lm')
+    data_bunch = (TextList.from_csv(path, csv_name='static/blank.csv', vocab=data_lm.vocab)
+        .random_split_by_pct()
+        .label_for_lm()
+        .databunch(bs=10))
+    learn = language_model_learner(data_bunch, pretrained_model=None)
+    learn.load(model_file_name)
+    return learn
 
+loop = asyncio.get_event_loop()
+tasks = [asyncio.ensure_future(setup_learner())]
+learn = loop.run_until_complete(asyncio.gather(*tasks))[0]
+loop.close()
 
-def build_pred(label_idx, log, prob):
-	label = SetupModel.labels[label_idx]
-	return dict(label=label, log=float(log), prob=float(prob))
+@app.route('/analyze', methods=['POST'])
+async def analyze(request):
+    data = await request.form()
 
+    return JSONResponse({'result': textResponse(data)})
 
-def parse_params(params):
-	image_url = urllib.parse.unquote_plus(params.get('image_url', ''))
-	n_labels = len(SetupModel.labels)
-	top_k = int(params.get('top_k', 3))
-	if top_k < 1: top_k = n_labels
-	return dict(image_url=image_url, top_k=min(top_k, n_labels))
+def textResponse(data):
+    csv_string = learn.predict(data['file'], 25, temperature=0.5, min_p=0.001)
+    time.sleep(2)
 
+    words = csv_string.split()
+    for i, word in enumerate(words):
+        if word == 'xxbos':
+            words[i] = '<br/>'
+        elif word == 'xxmaj':
+            words[i+1] = words[i+1][0].upper() + words[i+1][1:]
+            words[i] = ''
+        elif word == 'xxup':
+            words[i+1] = words[i+1].upper()
+            words[i] = ''     
+        elif word == 'xxunk' or word == '(' or word == ')' or word == '"':
+            words[i] = ''   
+        elif word == ',':
+            words[i] = ''
+        elif word == '.' or word == '?' or word == '!' or word == ';':
+            words[i-1]+= words[i]
+            words[i] = ''
+        elif word[0] == "'":
+            words[i-1]+= words[i]
+            words[i] = ''
 
-def predict(img):
-	batch = [T(TFMS(img))]
-	inp = VV_(torch.stack(batch))
-	return SetupModel.model(inp).mean(0)
+    return ' '.join(words)
 
-
-@SetupModel
-def handler(event, _):
-	if event is None: event = {}
-	print(event)
-	try:
-		# keep the lambda function warm
-		if event.get('detail-type') is 'Scheduled Event':
-			return 'nice & warm'
-
-		params = parse_params(event.get('queryStringParameters', {}))
-		out = predict(open_image_url(params['image_url']))
-		top = out.topk(params.get('top_k'), sorted=True)
-
-		logs, idxs = (t.data.numpy() for t in top)
-		probs = np.exp(logs)
-		preds = [build_pred(idx, logs[i], probs[i]) for i, idx in enumerate(idxs)]
-
-		response_body = dict(predictions=preds)
-		response = dict(statusCode=200, body=response_body)
-
-	except Exception as e:
-		response_body = dict(error=str(e), traceback=traceback.format_exc())
-		response = dict(statusCode=500, body=response_body)
-
-	response['body'] = json.dumps(response['body'])
-	print(response)
-	return response
+if __name__ == '__main__':
+    if 'serve' in sys.argv: uvicorn.run(app, host='0.0.0.0', port=5042)

@@ -3,7 +3,7 @@
 # For full config options, check the docs:
 #    docs.serverless.com
 
-service: dogscats
+service: eminem
 
 # You can pin your service to only deploy with a specific Serverless version
 frameworkVersion: ">=1.27.1"
@@ -71,7 +71,7 @@ custom:
 
 functions:
   predict:
-    handler: api/predict.handler
+    handler: api/predict.py
     events:
       - schedule: rate(15 minutes) # set CloudWatch function to keep lambda warm
       - http:
@@ -82,5 +82,4 @@ functions:
           request:
             parameters:
               querystrings:
-                image_url: true
-                top_k: false
+                predict_text: true
